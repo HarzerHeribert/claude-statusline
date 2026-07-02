@@ -10,6 +10,10 @@ Opus 4.8 (1M context):1M  eff:xhigh  think:on  ⠏ working    :: bitesize git:ma
 ctx [██████████████████████░░░░░░░░░░░░░░░░░░░░] 38% 379k/1M                                          ~$1283.62  |  +22909/-967  |  25h11m (api 8h03m)
 ```
 
+Actual render (Nerd Font icons, `auto mode` footer badge is Claude Code's, not ours):
+
+![claude-statusline screenshot](statusline.png)
+
 - **Row 1** — model + context-window size (`1M`/`200k`), reasoning effort, thinking
   state, output style, session name; then repo, git branch, working-tree state
   (`+staged ~modified ?untracked` or `clean`), ahead/behind (`^ v`), and open-PR
