@@ -24,9 +24,11 @@ while true; do
  "session_id":"demo"}
 JSON
 )
-  out=$(COLUMNS=$COLS CCSL_REFRESH=1 printf '%s' "$payload" | COLUMNS=$COLS CCSL_REFRESH=1 "$DIR/statusline.sh")
+  # all animations on (incl. the opt-in separator anim) so the demo shows them.
+  out=$(printf '%s' "$payload" | \
+    COLUMNS=$COLS CCSL_REFRESH=1 CCSL_SEP_ANIM=1 CCSL_COLOR256=1 "$DIR/statusline.sh")
   tput cup 0 0 2>/dev/null; tput ed 2>/dev/null
   printf '%s\n' "$out"
-  printf '\033[2m(demo — Ctrl-C to quit)\033[0m\n'
+  printf '\033[2m(demo — wave/pulse/shimmer/sep animate each second; Ctrl-C to quit)\033[0m\n'
   sleep 1
 done

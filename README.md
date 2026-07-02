@@ -72,14 +72,21 @@ profile):
 | `CCSL_ANIM`     | `1`     | master switch for all animation                     |
 | `CCSL_SPINNER`  | `1`     | spinner while API is busy                            |
 | `CCSL_SHIMMER`  | `1`     | sweeping bright cell in the context bar              |
+| `CCSL_WAVE`     | `1`     | scrolling color gradient across the filled bar       |
+| `CCSL_PULSE`    | `1`     | breathing (dim↔bright) intensity on the bar          |
+| `CCSL_WARN_ANIM`| `1`     | blink high context/rate-limit + "changes requested"  |
+| `CCSL_SEP_ANIM` | `0`     | animate the `::` / `\|` separators (subtle)           |
 | `CCSL_MARQUEE`  | `0`     | cycle the right rail of row 2 (off = show all)       |
+| `CCSL_DECOUPLE` | `1`     | skip jq/git on unchanged ticks (cache parsed data)   |
+| `CCSL_DATA_TTL` | `5`     | max seconds to trust the data snapshot               |
+| `CCSL_GIT_TTL`  | `2`     | seconds to cache git state between animation ticks    |
 | `CCSL_REFRESH`  | `10`    | must match `refreshInterval` for frame timing        |
 | `CCSL_BAR_MAX`  | `60`    | max context-bar width, chars                          |
 | `CCSL_COLOR`    | `1`     | colored output (`0` = plain)                          |
+| `CCSL_COLOR256` | `auto`  | 256-color ramp for the wave when supported           |
 | `CCSL_ASCII`    | `0`     | `1` = ASCII bar (`#`/`-`) + `\|/-\` spinner           |
 | `CCSL_NERD`     | `auto`  | `auto` detect a Nerd Font, `1` force icons, `0` off   |
 | `CCSL_MARGIN`   | `6`     | columns reserved at the right edge (anti-clip)        |
-| `CCSL_GIT_TTL`  | `2`     | seconds to cache git state between animation ticks    |
 
 ### Nerd Font icons
 
@@ -120,17 +127,40 @@ After installing, **set your terminal profile's font** to the Nerd Font (e.g.
 > yet. Prefer the plain `JetBrainsMono Nerd Font` variant over the `…Mono`/`…Propo`
 > variants — the `Mono` variant squeezes icons into a narrow cell and can clip them.
 
+## Animation is decoupled from data
+
+Claude Code sends the JSON payload on stdin and only changes it when real data
+changes. So the script splits into two phases:
+
+1. **Data** — hash stdin; if it matches the last snapshot (and the snapshot is
+   younger than `CCSL_DATA_TTL`), reuse the cached parsed values and **skip `jq`
+   and `git` entirely.** Otherwise parse with `jq`, gather git state, and write a
+   fresh snapshot.
+2. **Animation** — always runs, but it's pure arithmetic off a wall-clock frame
+   counter (`epoch / refreshInterval`). No subprocesses.
+
+The result: a tick where nothing changed is just a `cksum` + a `source` + string
+math. Every animation (shimmer, wave, pulse, warn-blink, separators) is
+**width-invariant** — it only changes colors or swaps equal-width glyphs — so the
+right-aligned rail never jitters between frames.
+
+This does **not** raise the frame rate (that's capped at 1s, see below); it makes
+each frame as cheap as possible.
+
 ## Performance
 
 The script does no network I/O and **costs zero API tokens** — Claude Code runs it
-locally. Per invocation it runs `jq` once and, on a cache miss, ~8 short-lived `git`
-subprocesses; git state is cached for `CCSL_GIT_TTL` seconds (default 2) so most
-animation ticks skip the git calls entirely.
+locally.
 
-Measured on an Apple Silicon Mac: **~25 ms per cached tick, ~45 ms on a git refresh.**
-At `refreshInterval: 1` that's on the order of **2–5% of a single CPU core while the
-session is idle, and 0% while you're actively working** (see below). Negligible in
-practice; if you want it even lighter, raise `CCSL_GIT_TTL` or the refresh interval.
+- **Unchanged tick (the common case):** no `jq`, no `git` — just a hash + reading
+  the cached snapshot. **~3–8 ms.**
+- **Data changed:** one `jq` parse + (on a git-cache miss) ~8 short-lived `git`
+  subprocesses. **~25–45 ms.**
+
+Measured on an Apple Silicon Mac. At `refreshInterval: 1` the idle cost is well
+**under a few percent of one CPU core, and 0% while you're actively working** (the
+timer is paused then). Raise `CCSL_DATA_TTL` / `CCSL_GIT_TTL` or the interval to
+make it lighter still; set `CCSL_DECOUPLE=0` to always re-parse (debugging).
 
 ## Why the animation updates once per second
 
