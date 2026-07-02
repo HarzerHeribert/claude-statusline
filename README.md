@@ -77,6 +77,31 @@ profile):
 | `CCSL_BAR_MAX`  | `60`    | max context-bar width, chars                          |
 | `CCSL_COLOR`    | `1`     | colored output (`0` = plain)                          |
 | `CCSL_ASCII`    | `0`     | `1` = ASCII bar (`#`/`-`) + `\|/-\` spinner           |
+| `CCSL_NERD`     | `auto`  | `auto` detect a Nerd Font, `1` force icons, `0` off   |
+| `CCSL_MARGIN`   | `6`     | columns reserved at the right edge (anti-clip)        |
+
+### Nerd Font icons
+
+With a [Nerd Font](https://nerdfonts.com) installed and selected in your terminal,
+the status line shows glyphs instead of text labels:
+
+```
+ Opus 4.8:1M   high    ::  bitesize  main   1  1  ::   673 OK
+ [████▓██░░░] 13% 128k/1M                        ~$16.52  |   +830/-107  |   17m
+```
+
+`CCSL_NERD=auto` (default) uses icons only when a Nerd Font is detected, so it's
+safe on machines without one — it falls back to `eff:high`, `git:main`, `↑1 ↓1`,
+`PR#673`, etc. The installer can install **JetBrainsMono Nerd Font** for you:
+
+```bash
+./install.sh --nerd      # brew-install the font + force icons on
+./install.sh --no-nerd   # skip the font, use the ASCII/Unicode fallback
+./install.sh             # detects a font; if none, offers to install it
+```
+
+After installing, **set your terminal profile's font** to the Nerd Font (e.g.
+"JetBrainsMono Nerd Font") — the shell can't switch the terminal font for you.
 
 Example — static, ASCII, no color:
 

@@ -40,6 +40,7 @@ CCSL_REFRESH=${CCSL_REFRESH:-10}
 CCSL_BAR_MAX=${CCSL_BAR_MAX:-60}
 CCSL_COLOR=${CCSL_COLOR:-1}
 CCSL_ASCII=${CCSL_ASCII:-0}
+CCSL_NERD=${CCSL_NERD:-auto}   # auto | 1 | 0 : use Nerd Font glyphs for icons
 [ "$CCSL_ANIM" = "0" ] && { CCSL_SPINNER=0; CCSL_SHIMMER=0; CCSL_MARQUEE=0; }
 
 # --- terminal width (harness sets COLUMNS; fall back sanely) ----------------
@@ -140,6 +141,58 @@ justify() {  # left ... right, padded to COLS
 
 CTX_LABEL="200k"; [ "$CTX_SIZE" -ge 1000000 ] && CTX_LABEL="1M"
 
+# --- Nerd Font glyphs ------------------------------------------------------
+# CCSL_NERD=auto detects an installed Nerd Font (cached ~1 day). =1 forces on,
+# =0 forces the ASCII/Unicode fallback. ASCII mode always wins (no glyphs).
+nerd_installed() {
+  local c="${TMPDIR:-/tmp}/ccsl-nerd.detect"
+  if [ -f "$c" ] && [ "$(( NOW - $(cat "$c.ts" 2>/dev/null || echo 0) ))" -lt 86400 ]; then
+    [ "$(cat "$c" 2>/dev/null)" = "1" ]; return
+  fi
+  local found=0
+  if command -v fc-list >/dev/null 2>&1; then
+    fc-list 2>/dev/null | grep -qiE 'nerd font|nerdfont' && found=1
+  else
+    # macOS: no fc-list by default -> look for a *Nerd Font*.ttf in font dirs
+    ls "$HOME/Library/Fonts"/*[Nn]erd* /Library/Fonts/*[Nn]erd* \
+       /System/Library/Fonts/*[Nn]erd* 2>/dev/null | grep -q . && found=1
+  fi
+  printf '%s' "$found" > "$c" 2>/dev/null; printf '%s' "$NOW" > "$c.ts" 2>/dev/null
+  [ "$found" = "1" ]
+}
+USE_NERD=0
+if [ "$CCSL_ASCII" != "1" ]; then
+  case "$CCSL_NERD" in
+    1) USE_NERD=1 ;;
+    0) USE_NERD=0 ;;
+    *) nerd_installed && USE_NERD=1 ;;
+  esac
+fi
+
+if [ "$USE_NERD" = "1" ]; then
+  # Nerd Font (JetBrainsMono NF etc.) — private-use-area glyphs, 1 col each.
+  I_MODEL=$''      # robot / ai
+  I_EFFORT=$''     # bolt
+  I_THINK=$''      # lightbulb
+  I_DIR=$''        # folder
+  I_GIT=$''        # branch
+  I_AHEAD=$''      # arrow-up
+  I_BEHIND=$''     # arrow-down
+  I_CLEAN=$''      # check
+  I_PR=$''         # git-pull-request (octicon)
+  I_CTX=$''        # database / stack
+  I_COST=$''       # money
+  I_TIME=$''       # clock
+  I_LINES=$''      # pencil
+  I_LIMIT=$''      # tint / gauge
+else
+  # ASCII / Unicode fallback — readable everywhere, no special font needed.
+  I_MODEL=''; I_EFFORT='eff:'; I_THINK='think'; I_DIR=''
+  I_GIT='git:'; I_AHEAD=$'↑'; I_BEHIND=$'↓'; I_CLEAN='clean'
+  I_PR='PR'; I_CTX='ctx'; I_COST=''; I_TIME=''; I_LINES=''; I_LIMIT=''
+  [ "$CCSL_ASCII" = "1" ] && { I_AHEAD='^'; I_BEHIND='v'; }
+fi
+
 # --- API-busy detection (cache last api_ms per session) --------------------
 API_BUSY=0
 if [ "$CCSL_SPINNER" = "1" ]; then
@@ -155,10 +208,17 @@ SPIN="${SPIN_FRAMES[$(( FRAME % ${#SPIN_FRAMES[@]} ))]}"
 # ==========================================================================
 # ROW 1  --  left: identity+git+pr   |   right: rate limits
 # ==========================================================================
-L="${CYAN}${BOLD}${MODEL}${RESET}${GREY}:${CTX_LABEL}${RESET}"
+# model: "<icon> Name:1M"  (icon only in nerd mode; else just the name)
+MPFX=""; [ -n "$I_MODEL" ] && MPFX="${I_MODEL} "
+L="${CYAN}${BOLD}${MPFX}${MODEL}${RESET}${GREY}:${CTX_LABEL}${RESET}"
 [ -n "$SESSNAME" ]  && L="$L ${DIM}(${SESSNAME})${RESET}"
-[ -n "$EFFORT" ]    && L="$L  ${MAGENTA}eff:${EFFORT}${RESET}"
-[ -n "$THINKING" ]  && L="$L  ${MAGENTA}think:on${RESET}"
+# effort: nerd -> " high" ; fallback -> "eff:high"
+[ -n "$EFFORT" ]    && L="$L  ${MAGENTA}${I_EFFORT}${EFFORT}${RESET}"
+# thinking: nerd -> just the bulb ; fallback -> "think:on"
+if [ -n "$THINKING" ]; then
+  if [ "$USE_NERD" = "1" ]; then L="$L  ${MAGENTA}${I_THINK}${RESET}"
+  else L="$L  ${MAGENTA}${I_THINK}:on${RESET}"; fi
+fi
 [ "$OUTSTYLE" != "default" ] && L="$L  ${DIM}style:${OUTSTYLE}${RESET}"
 
 if git rev-parse --git-dir >/dev/null 2>&1; then
@@ -168,19 +228,22 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
   UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
 
-  L="$L  ${GREY}::${RESET} ${WHITE}${DIR}${RESET} ${GREEN}git:${BRANCH}${RESET}"
+  # dir: folder icon (nerd) or plain name ; git: branch icon or "git:"
+  DPFX=""; [ -n "$I_DIR" ] && DPFX="${I_DIR} "
+  L="$L  ${GREY}::${RESET} ${WHITE}${DPFX}${DIR}${RESET} ${GREEN}${I_GIT}${BRANCH}${RESET}"
   D=""
   [ "$STAGED"    -gt 0 ] && D="$D ${GREEN}+${STAGED}${RESET}"
   [ "$MODIFIED"  -gt 0 ] && D="$D ${YELLOW}~${MODIFIED}${RESET}"
   [ "$UNTRACKED" -gt 0 ] && D="$D ${RED}?${UNTRACKED}${RESET}"
-  [ -z "$D" ] && D=" ${GREEN}clean${RESET}"
+  # clean marker: nerd -> check glyph ; fallback -> "clean"
+  [ -z "$D" ] && D=" ${GREEN}${I_CLEAN}${RESET}"
   L="$L$D"
 
   if UP=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null); then
     AB=$(git rev-list --left-right --count "${UP}...HEAD" 2>/dev/null)
     BEHIND=$(echo "$AB" | cut -f1); AHEAD=$(echo "$AB" | cut -f2)
-    [ "${AHEAD:-0}"  -gt 0 ] && L="$L ${CYAN}^${AHEAD}${RESET}"
-    [ "${BEHIND:-0}" -gt 0 ] && L="$L ${CYAN}v${BEHIND}${RESET}"
+    [ "${AHEAD:-0}"  -gt 0 ] && L="$L ${CYAN}${I_AHEAD}${AHEAD}${RESET}"
+    [ "${BEHIND:-0}" -gt 0 ] && L="$L ${CYAN}${I_BEHIND}${BEHIND}${RESET}"
   fi
 fi
 
@@ -191,7 +254,9 @@ if [ -n "$PR_NUM" ]; then
     draft)             PR_TAG="${GREY}DRAFT${RESET}" ;;
     *)                 PR_TAG="${YELLOW}REVIEW${RESET}" ;;
   esac
-  L="$L  ${GREY}::${RESET} ${BLUE}PR#${PR_NUM}${RESET} $PR_TAG"
+  # PR: nerd -> pull-request glyph ; fallback -> "PR#"
+  if [ "$USE_NERD" = "1" ]; then PRLBL="${I_PR} ${PR_NUM}"; else PRLBL="${I_PR}#${PR_NUM}"; fi
+  L="$L  ${GREY}::${RESET} ${BLUE}${PRLBL}${RESET} $PR_TAG"
 fi
 
 # spinner appended to left when API is busy
@@ -201,7 +266,8 @@ fi
 R=""
 if [ "$RL5" != "-1" ]; then
   RL5I=${RL5%.*}; C=$(pcolor "$RL5I")
-  seg="${C}5h ${RL5I}%${RESET}"
+  LPFX=""; [ -n "$I_LIMIT" ] && LPFX="${I_LIMIT} "
+  seg="${C}${LPFX}5h ${RL5I}%${RESET}"
   [ "$RL5_RESET" -gt 0 ] && seg="$seg ${DIM}$(until_reset "$RL5_RESET")${RESET}"
   R="$seg"
 fi
@@ -240,15 +306,22 @@ else
 fi
 printf -v EE "%${EMPTY}s" ""; BAR="${BAR}${EE// /$G_EMPTY}"
 
-L2="${GREY}ctx${RESET} ${BC}[${BAR}]${RESET} ${BC}${BOLD}${CTX_PCT}%${RESET} ${GREY}$(human "$CTX_IN")/${CTX_LABEL}${RESET}"
+# ctx label: nerd -> stack glyph ; fallback -> "ctx"
+CTXLBL="ctx"; [ -n "$I_CTX" ] && CTXLBL="$I_CTX"
+L2="${GREY}${CTXLBL}${RESET} ${BC}[${BAR}]${RESET} ${BC}${BOLD}${CTX_PCT}%${RESET} ${GREY}$(human "$CTX_IN")/${CTX_LABEL}${RESET}"
 
-# right side of row 2
-COST_SEG="${YELLOW}$(printf '~$%.2f' "$COST")${RESET}"
-LINES_SEG=""; [ "$ADDED" -gt 0 ] || [ "$REMOVED" -gt 0 ] && \
-  LINES_SEG="${GREEN}+${ADDED}${RESET}${GREY}/${RESET}${RED}-${REMOVED}${RESET}"
+# right side of row 2 (icons prefixed in nerd mode)
+CPFX=""; [ -n "$I_COST" ] && CPFX="${I_COST} "
+COST_SEG="${YELLOW}${CPFX}$(printf '~$%.2f' "$COST")${RESET}"
+LINES_SEG=""
+if [ "$ADDED" -gt 0 ] || [ "$REMOVED" -gt 0 ]; then
+  XPFX=""; [ -n "$I_LINES" ] && XPFX="${I_LINES} "
+  LINES_SEG="${XPFX}${GREEN}+${ADDED}${RESET}${GREY}/${RESET}${RED}-${REMOVED}${RESET}"
+fi
 DUR_SEG=""
 if [ "$DUR_MS" -gt 0 ]; then
-  DUR_SEG="${DIM}$(dur "$DUR_MS")${RESET}"
+  TPFX=""; [ -n "$I_TIME" ] && TPFX="${I_TIME} "
+  DUR_SEG="${DIM}${TPFX}$(dur "$DUR_MS")${RESET}"
   [ "$API_MS" -gt 0 ] && DUR_SEG="$DUR_SEG ${DIM}(api $(dur "$API_MS"))${RESET}"
 fi
 TOK_SEG="${GREY}$(human "$CTX_IN") tok${RESET}"
