@@ -43,9 +43,16 @@ CCSL_ASCII=${CCSL_ASCII:-0}
 [ "$CCSL_ANIM" = "0" ] && { CCSL_SPINNER=0; CCSL_SHIMMER=0; CCSL_MARQUEE=0; }
 
 # --- terminal width (harness sets COLUMNS; fall back sanely) ----------------
+# The status bar can't use the full terminal width: the harness reserves a
+# right-hand margin for its own notifications (token counter, MCP errors) and
+# the row has built-in side padding. Subtract CCSL_MARGIN so the right rail
+# never touches the true edge and get clipped.
+CCSL_MARGIN=${CCSL_MARGIN:-6}
 COLS=${COLUMNS:-0}
 [ "$COLS" -lt 40 ] 2>/dev/null && COLS=120
-[ "$COLS" -gt 240 ] 2>/dev/null && COLS=240
+[ "$COLS" -gt 300 ] 2>/dev/null && COLS=300
+COLS=$(( COLS - CCSL_MARGIN ))
+[ "$COLS" -lt 40 ] && COLS=40
 
 # --- jq extraction (KEY='val' lines, quoted; jq // treats null as absent) --
 if ! command -v jq >/dev/null 2>&1; then
