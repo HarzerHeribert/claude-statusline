@@ -7,17 +7,18 @@
 #   row 1: identity + git + PR ......................... rate limits (right)
 #   row 2: [context bar] ctx tokens .......... cost / lines / durations (right)
 #
-# ANIMATION (tick-based; requires "refreshInterval" in settings.json):
+# ANIMATION (state-flip only; requires "refreshInterval" in settings.json):
+# The harness caps rendering at 1 fps (refreshInterval min = 1; output shows
+# only when the script exits, in-flight runs are cancelled). At that rate any
+# MOTION — sweeps, waves, pulses — reads as broken rendering, so the context
+# bar never animates. It has a static "shine" instead: a same-hue gradient
+# gloss at the fill edge (CCSL_SHINE), identical bytes every tick.
+# What does animate are discrete STATE FLIPS, which read fine at 1 fps:
 #   - spinner while the API is actively responding
-#   - shimmer: a bright cell sweeps across the filled context bar
-#   - wave: a scrolling color gradient across the filled bar
-#   - pulse: the filled bar breathes (dim<->bright) each cycle
 #   - warn: high context/rate-limit and "changes requested" segments blink
 #   - marquee (opt-in): cycles the right rail of row 2 through stats
 #   - sep (opt-in): the :: / | separators cycle subtly
 # Frames advance off wall-clock time, so no persistent frame state is needed.
-# The rendered frame rate is capped at 1s by Claude Code (refreshInterval min = 1);
-# these animations make each tick cheap, they can't exceed that 1 fps ceiling.
 #
 # DECOUPLING (data vs animation):
 #   The harness only changes the stdin payload when real data changes. We hash it
@@ -32,9 +33,7 @@
 # CONFIG (env vars, override in settings.json "command" or your shell profile):
 #   CCSL_ANIM=1            master switch for all animation (0 disables)
 #   CCSL_SPINNER=1         spinner while API busy
-#   CCSL_SHIMMER=1         sweeping bright cell in the context bar
-#   CCSL_WAVE=1            scrolling gradient in the bar (else plain shimmer)
-#   CCSL_PULSE=1           breathing intensity on the context bar
+#   CCSL_SHINE=1           static same-hue gloss at the fill edge (never moves)
 #   CCSL_WARN_ANIM=1       blink high-usage / changes-requested segments
 #   CCSL_SEP_ANIM=0        animate :: / | separators (subtle)
 #   CCSL_MARQUEE=0         cycle right rail of row 2 (off by default; shows all at once)
@@ -54,7 +53,7 @@ input=$(cat)
 # --- config with defaults --------------------------------------------------
 CCSL_ANIM=${CCSL_ANIM:-1}
 CCSL_SPINNER=${CCSL_SPINNER:-1}
-CCSL_SHIMMER=${CCSL_SHIMMER:-1}
+CCSL_SHINE=${CCSL_SHINE:-1}   # static gloss at the fill edge (not an animation)
 CCSL_MARQUEE=${CCSL_MARQUEE:-0}
 CCSL_REFRESH=${CCSL_REFRESH:-10}
 CCSL_BAR_MAX=${CCSL_BAR_MAX:-60}
@@ -65,14 +64,12 @@ CCSL_GIT_TTL=${CCSL_GIT_TTL:-2}  # seconds to cache git state between ticks
 # --- decouple: skip jq/git when the payload hasn't changed -----------------
 CCSL_DECOUPLE=${CCSL_DECOUPLE:-1}   # 1 = cache parsed data; unchanged ticks skip jq
 CCSL_DATA_TTL=${CCSL_DATA_TTL:-5}   # max seconds to trust the data snapshot
-# --- extra animations (all within the 1s cadence, width-invariant) ---------
-CCSL_PULSE=${CCSL_PULSE:-1}         # breathing intensity on the context bar
-CCSL_WAVE=${CCSL_WAVE:-1}           # scrolling gradient in the bar (else shimmer)
+# --- state-flip animations (all within the 1s cadence, width-invariant) ----
 CCSL_WARN_ANIM=${CCSL_WARN_ANIM:-1} # blink high-usage / changes-requested segments
 CCSL_SEP_ANIM=${CCSL_SEP_ANIM:-0}   # animate :: / | separators (subtle)
-CCSL_COLOR256=${CCSL_COLOR256:-auto} # 256-color ramp for the wave when supported
-[ "$CCSL_ANIM" = "0" ] && { CCSL_SPINNER=0; CCSL_SHIMMER=0; CCSL_MARQUEE=0; \
-  CCSL_PULSE=0; CCSL_WAVE=0; CCSL_WARN_ANIM=0; CCSL_SEP_ANIM=0; }
+CCSL_COLOR256=${CCSL_COLOR256:-auto} # 256-color ramp for the shine when supported
+[ "$CCSL_ANIM" = "0" ] && { CCSL_SPINNER=0; CCSL_MARQUEE=0; \
+  CCSL_WARN_ANIM=0; CCSL_SEP_ANIM=0; }
 
 # --- terminal width (harness sets COLUMNS; fall back sanely) ----------------
 # The status bar can't use the full terminal width: the harness reserves a
@@ -217,28 +214,34 @@ fi
 
 # --- bar glyphs ------------------------------------------------------------
 if [ "$CCSL_ASCII" = "1" ]; then
-  G_FULL='#'; G_EMPTY='-'; G_BRIGHT='='
+  G_FULL='#'; G_EMPTY='-'
 else
-  G_FULL='█'; G_EMPTY='░'; G_BRIGHT='▓'
+  G_FULL='█'; G_EMPTY='░'
 fi
 
-# --- wave palette (scrolling gradient across the filled bar) ----------------
-# Resolve CCSL_COLOR256=auto from $TERM; build a small ramp either way. The wave
-# only changes SGR color per cell, never the glyph, so bar width stays constant.
-WAVE_PALETTE=()
-if [ "$CCSL_COLOR" = "1" ] && [ "$CCSL_ASCII" != "1" ]; then
-  use256=0
-  case "$CCSL_COLOR256" in
-    1) use256=1 ;;
-    0) use256=0 ;;
-    *) case "${TERM:-}" in *256color*|*-direct) use256=1 ;; esac ;;
-  esac
+# --- shine ramp (same hue as the bar, brighter shades) -----------------------
+# RAMP[0] is the bar's base tone; RAMP[1..2] are brighter shades of the SAME
+# hue for the static gloss at the fill edge. Highlights read as a sheen on the
+# bar color — no cyan flips, no white pops — and never move between ticks.
+use256=0
+case "$CCSL_COLOR256" in
+  1) use256=1 ;;
+  0) use256=0 ;;
+  *) case "${TERM:-}" in *256color*|*-direct) use256=1 ;; esac ;;
+esac
+RAMP=()
+if [ "$CCSL_COLOR" = "1" ]; then
   if [ "$use256" = "1" ]; then
-    # green -> cyan -> green ramp in the 256-color cube (fg codes 38;5;N)
-    for n in 34 40 46 45 44 44 45 46 40 34; do WAVE_PALETTE+=("\033[38;5;${n}m"); done
+    # per-severity ramps in the 256-color cube (fg codes 38;5;N), dark -> bright
+    if   [ "${CTX_PCT:-0}" -ge 90 ]; then SHADES=(124 160 203)  # reds
+    elif [ "${CTX_PCT:-0}" -ge 70 ]; then SHADES=(178 220 228)  # yellows
+    else                                  SHADES=(34 40 46);  fi # greens
+    for n in "${SHADES[@]}"; do RAMP+=("\033[38;5;${n}m"); done
   else
-    # 16-color fallback: cycle green / bright-green / cyan
-    WAVE_PALETTE+=("\033[32m" "\033[92m" "\033[36m" "\033[92m")
+    # 16-color fallback: normal / bright / bold-bright of the same hue
+    if   [ "${CTX_PCT:-0}" -ge 90 ]; then RAMP=('\033[31m' '\033[91m' '\033[1;91m')
+    elif [ "${CTX_PCT:-0}" -ge 70 ]; then RAMP=('\033[33m' '\033[93m' '\033[1;93m')
+    else                                  RAMP=('\033[32m' '\033[92m' '\033[1;92m'); fi
   fi
 fi
 
@@ -435,35 +438,25 @@ FILLED=$(( CTX_PCT * BAR_W / 100 )); [ "$FILLED" -gt "$BAR_W" ] && FILLED=$BAR_W
 EMPTY=$(( BAR_W - FILLED ))
 BC=$(pcolor "$CTX_PCT")
 
-# Build the filled region. Three composable animations, all color-only so the
-# printable width is exactly FILLED+EMPTY every frame:
-#   - PULSE: a breathing intensity applied to the whole filled run (SGR 2/none/1)
-#   - WAVE : a scrolling gradient, each cell colored by (i+FRAME) % palette
-#   - SHIMMER: one bright cell swept across (overlays wave/pulse)
-# pulse phase -> intensity prefix (dim, normal, bright, normal)
-PULSE_SGR=""
-if [ "$CCSL_PULSE" = "1" ] && [ "$CCSL_COLOR" = "1" ]; then
-  case $(( FRAME % 4 )) in 0) PULSE_SGR='\033[2m';; 2) PULSE_SGR='\033[1m';; *) PULSE_SGR='';; esac
-fi
-have_wave=0
-[ "$CCSL_WAVE" = "1" ] && [ "${#WAVE_PALETTE[@]}" -gt 0 ] && [ "$FILLED" -gt 0 ] && have_wave=1
-SPOS=-1
-[ "$CCSL_SHIMMER" = "1" ] && [ "$FILLED" -gt 1 ] && SPOS=$(( FRAME % FILLED ))
+# Build the filled region. The bar NEVER animates (at 1 fps any motion reads
+# as broken rendering). With CCSL_SHINE it gets a static gloss: the last three
+# cells of the fill step up through brighter shades of the same hue, so the
+# bar reads as lit without a single byte changing between ticks. Color-only
+# (the glyph is always G_FULL), so printable width is exactly FILLED+EMPTY.
+GLOSS=0
+[ "$CCSL_SHINE" = "1" ] && [ "${#RAMP[@]}" -ge 3 ] && [ "$FILLED" -gt 3 ] && GLOSS=1
 
-BAR=""
-if [ "$have_wave" = "1" ] || [ "$SPOS" -ge 0 ] || [ -n "$PULSE_SGR" ]; then
-  np=${#WAVE_PALETTE[@]}
-  for ((i=0; i<FILLED; i++)); do
-    if [ "$i" -eq "$SPOS" ]; then
-      BAR="${BAR}${BRIGHT}${G_BRIGHT}${RESET}"
-    elif [ "$have_wave" = "1" ]; then
-      BAR="${BAR}${WAVE_PALETTE[$(( (i + FRAME) % np ))]}${PULSE_SGR}${G_FULL}${RESET}"
-    else
-      BAR="${BAR}${BC}${PULSE_SGR}${G_FULL}${RESET}"
-    fi
-  done
+# base tone for filled cells: the ramp's darkest shade when we have one, so
+# the gloss blends into the fill instead of sitting on a slightly-off base
+BASE_FG=$BC
+[ "${#RAMP[@]}" -ge 3 ] && BASE_FG=${RAMP[0]}
+
+if [ "$GLOSS" = "1" ]; then
+  printf -v FF "%$(( FILLED - 3 ))s" ""
+  BAR="${BASE_FG}${FF// /$G_FULL}${RESET}"
+  BAR="${BAR}${RAMP[1]}${G_FULL}${G_FULL}${RESET}${RAMP[2]}${G_FULL}${RESET}"
 else
-  printf -v FF "%${FILLED}s" ""; BAR="${BC}${FF// /$G_FULL}${RESET}"
+  printf -v FF "%${FILLED}s" ""; BAR="${BASE_FG}${FF// /$G_FULL}${RESET}"
 fi
 printf -v EE "%${EMPTY}s" ""; BAR="${BAR}${GREY}${EE// /$G_EMPTY}${RESET}"
 

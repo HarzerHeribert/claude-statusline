@@ -7,7 +7,7 @@ Two rows, left/right justified to fill the terminal:
 
 ```
 Opus 4.8 (1M context):1M  eff:xhigh  think:on  ⠏ working    :: bitesize git:main clean ^1 v1  :: PR#673 OK          5h 23% 2h14m  |  7d 41% 83h20m
-ctx [███████████▓██████████░░░░░░░░░░░░░░░░░░░░] 38% 379k/1M                                          ~$1283.62  |  +22909/-967  |  25h11m (api 8h03m)
+ctx [██████████████████████░░░░░░░░░░░░░░░░░░░░] 38% 379k/1M                                          ~$1283.62  |  +22909/-967  |  25h11m (api 8h03m)
 ```
 
 - **Row 1** — model + context-window size (`1M`/`200k`), reasoning effort, thinking
@@ -18,16 +18,24 @@ ctx [███████████▓██████████░░░
 - **Row 2** — a context-usage bar (color-coded, scales to terminal width) with % and
   token count; cost estimate, lines changed, and durations on the right.
 
-### Animation (tick-based)
+### Animation: state flips only — the bar never moves
 
-Claude Code re-runs the status line on events and every `refreshInterval` seconds.
-Frames advance off wall-clock time, so no persistent state is needed.
+Claude Code renders the status line at most **once per second** (see
+[below](#why-the-animation-updates-once-per-second)). At that rate any *motion* —
+sweeps, waves, pulses — doesn't read as animation, it reads as broken rendering.
+So the context bar **never animates**. Instead it has a static **shine**: the last
+cells of the fill step up through brighter shades of the *same hue* (256-color
+when supported), so the bar reads as lit and glossy while rendering byte-identical
+every tick.
+
+What does animate are discrete **state flips**, which look fine at 1 fps:
 
 - **Spinner** — `⠋⠙⠹…` next to the model while the API is actively responding
   (detected by watching `total_api_duration_ms` advance between ticks).
-- **Shimmer** — a bright cell sweeps across the filled part of the context bar.
+- **Warn blink** — context ≥90%, rate limit ≥90%, and "changes requested" blink.
 - **Marquee** *(opt-in)* — the right rail of row 2 cycles through
   cost → lines → durations → tokens, one per tick.
+- **Separators** *(opt-in)* — the `::` / `|` separators cycle subtly.
 
 ## Honest about cost
 
@@ -47,11 +55,12 @@ cd claude-statusline
 ```
 
 The installer copies `statusline.sh` to `~/.claude/`, backs up your
-`settings.json`, and wires up the `statusLine` block with `refreshInterval: 10`.
-It appears on your next interaction with Claude Code.
+`settings.json`, and wires up the `statusLine` block with `refreshInterval: 1`
+(the fastest allowed — cheap, since unchanged ticks skip `jq`/`git` and an idle
+bar renders identically). It appears on your next interaction with Claude Code.
 
 ```bash
-REFRESH=5 ./install.sh     # faster animation
+REFRESH=5 ./install.sh     # slower tick, if you want it even lighter
 ./install.sh --dry-run     # show changes, do nothing
 ./install.sh --uninstall   # remove the statusLine block (keeps the script)
 ```
@@ -59,8 +68,12 @@ REFRESH=5 ./install.sh     # faster animation
 ## Preview it without a session
 
 ```bash
-./demo.sh        # live animated render in your terminal (Ctrl-C to quit)
+./demo.sh        # live render in your terminal (Ctrl-C to quit)
 ```
+
+The demo cycles ~5 s "active" (payload changing → spinner runs, numbers move) and
+~7 s idle (payload frozen → everything holds perfectly still), so you can see
+both states.
 
 ## Configuration
 
@@ -69,11 +82,9 @@ profile):
 
 | Var             | Default | Meaning                                             |
 | --------------- | ------- | --------------------------------------------------- |
-| `CCSL_ANIM`     | `1`     | master switch for all animation                     |
+| `CCSL_ANIM`     | `1`     | master switch for the state-flip animations         |
 | `CCSL_SPINNER`  | `1`     | spinner while API is busy                            |
-| `CCSL_SHIMMER`  | `1`     | sweeping bright cell in the context bar              |
-| `CCSL_WAVE`     | `1`     | scrolling color gradient across the filled bar       |
-| `CCSL_PULSE`    | `1`     | breathing (dim↔bright) intensity on the bar          |
+| `CCSL_SHINE`    | `1`     | static same-hue gloss at the fill edge (never moves) |
 | `CCSL_WARN_ANIM`| `1`     | blink high context/rate-limit + "changes requested"  |
 | `CCSL_SEP_ANIM` | `0`     | animate the `::` / `\|` separators (subtle)           |
 | `CCSL_MARQUEE`  | `0`     | cycle the right rail of row 2 (off = show all)       |
@@ -83,7 +94,7 @@ profile):
 | `CCSL_REFRESH`  | `10`    | must match `refreshInterval` for frame timing        |
 | `CCSL_BAR_MAX`  | `60`    | max context-bar width, chars                          |
 | `CCSL_COLOR`    | `1`     | colored output (`0` = plain)                          |
-| `CCSL_COLOR256` | `auto`  | 256-color ramp for the wave when supported           |
+| `CCSL_COLOR256` | `auto`  | 256-color ramp for the shine when supported          |
 | `CCSL_ASCII`    | `0`     | `1` = ASCII bar (`#`/`-`) + `\|/-\` spinner           |
 | `CCSL_NERD`     | `auto`  | `auto` detect a Nerd Font, `1` force icons, `0` off   |
 | `CCSL_MARGIN`   | `6`     | columns reserved at the right edge (anti-clip)        |
@@ -95,7 +106,7 @@ the status line shows glyphs instead of text labels:
 
 ```
  Opus 4.8:1M   high    ::  bitesize  main   1  1  ::   673 OK
- [████▓██░░░] 13% 128k/1M                        ~$16.52  |   +830/-107  |   17m
+ [███████░░░] 13% 128k/1M                        ~$16.52  |   +830/-107  |   17m
 ```
 
 `CCSL_NERD=auto` (default) uses icons only when a Nerd Font is detected, so it's
@@ -140,7 +151,7 @@ changes. So the script splits into two phases:
    counter (`epoch / refreshInterval`). No subprocesses.
 
 The result: a tick where nothing changed is just a `cksum` + a `source` + string
-math. Every animation (shimmer, wave, pulse, warn-blink, separators) is
+math. Every state flip (spinner, warn-blink, marquee, separators) is
 **width-invariant** — it only changes colors or swaps equal-width glyphs — so the
 right-aligned rail never jitters between frames.
 
@@ -168,13 +179,18 @@ make it lighter still; set `CCSL_DECOUPLE=0` to always re-parse (debugging).
 [docs](https://code.claude.com/docs/en/statusline) state the minimum is `1` second,
 so one frame per second is the ceiling, not a choice. Two more facts worth knowing:
 
-- Frames are derived from wall-clock time (`epoch / refreshInterval`), so at a 1 s
-  interval the shimmer/spinner advance one step per second.
-- The refresh timer **only fires while the session is idle.** During active
-  streaming the harness drives status-line updates its own way, so you won't see
-  steady 1 s animation mid-response. This is a platform constraint, not a bug.
+- Output is displayed only when the script **exits** — you can't stream frames from
+  one invocation, and an in-flight run is cancelled when a new update triggers.
+- Event-driven updates are debounced at 300 ms and fire on new messages, `/compact`,
+  permission-mode changes, etc. — not on a smooth clock.
+- The fullscreen (`/tui`) renderer makes redraws flicker-free, but does not change
+  any of the above.
+- **Plugins can't change this either** — plugins add skills, hooks, MCP servers and
+  agents; none of that touches the TUI renderer or the status-line contract.
 
-Set `CCSL_ANIM=0` for a fully static line if you'd rather not have the tick at all.
+That 1 fps ceiling is exactly why the bar doesn't animate at all: motion at 1 fps
+reads as broken rendering, while discrete state flips (spinner on/off, a blink, a
+segment swap) read as intended. Set `CCSL_ANIM=0` to turn the state flips off too.
 
 Example — static, ASCII, no color:
 

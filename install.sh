@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ./install.sh                 # install; offer to install a Nerd Font
-#   REFRESH=5 ./install.sh       # faster animation (refreshInterval seconds)
+#   REFRESH=5 ./install.sh       # slower tick (refreshInterval seconds; default 1)
 #   ./install.sh --nerd          # install JetBrainsMono Nerd Font (brew) + force icons
 #   ./install.sh --no-nerd       # skip font, use ASCII/Unicode fallback
 #   ./install.sh --uninstall     # remove the statusLine block (keeps script)

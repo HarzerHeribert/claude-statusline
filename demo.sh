@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# demo.sh — render the status line live in your terminal so you can see the
-# animation, without needing a Claude Code session. Ctrl-C to quit.
+# demo.sh — render the status line live in your terminal so you can see it,
+# without needing a Claude Code session. Ctrl-C to quit.
+#
+# Cycles 12s: ~5s "active" (the payload changes each tick, so the spinner runs
+# and the numbers move), then ~7s idle (the payload is frozen — note the bar
+# and everything else hold perfectly still; only state flips ever animate).
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COLS=$(tput cols 2>/dev/null || echo 120)
 START=$(date +%s)
+ACT=0
 
 trap 'tput cnorm 2>/dev/null; echo; exit 0' INT
 tput civis 2>/dev/null  # hide cursor
 
 while true; do
-  now=$(date +%s); el=$(( (now-START)*1000 ))
-  # a fake, slowly-growing session; api_ms advances every other second so the
-  # spinner toggles busy/idle
-  api=$(( el / 2 ))
-  pct=$(( 10 + (now-START)*2 % 80 ))
+  now=$(date +%s); t=$(( now - START ))
+  phase=$(( t % 12 ))
+  label="idle   (everything holds still; static gloss at the fill edge)"
+  if [ "$phase" -lt 5 ]; then
+    # active: advance the fake session so the spinner + numbers move
+    ACT=$(( ACT + 1 ))
+    label="active (spinner runs, numbers move; the bar itself never animates)"
+  fi
+  el=$(( ACT * 1800 )); api=$(( ACT * 900 ))
+  pct=$(( 15 + ACT * 3 % 75 ))
   payload=$(cat <<JSON
 {"model":{"display_name":"Opus 4.8 (1M context)"},
  "workspace":{"current_dir":"$DIR"},
@@ -24,11 +34,10 @@ while true; do
  "session_id":"demo"}
 JSON
 )
-  # all animations on (incl. the opt-in separator anim) so the demo shows them.
   out=$(printf '%s' "$payload" | \
-    COLUMNS=$COLS CCSL_REFRESH=1 CCSL_SEP_ANIM=1 CCSL_COLOR256=1 "$DIR/statusline.sh")
+    COLUMNS=$COLS CCSL_REFRESH=1 CCSL_COLOR256=1 "$DIR/statusline.sh")
   tput cup 0 0 2>/dev/null; tput ed 2>/dev/null
   printf '%s\n' "$out"
-  printf '\033[2m(demo — wave/pulse/shimmer/sep animate each second; Ctrl-C to quit)\033[0m\n'
+  printf '\033[2m(demo — %s; Ctrl-C to quit)\033[0m\n' "$label"
   sleep 1
 done
