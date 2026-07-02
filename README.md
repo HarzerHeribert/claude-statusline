@@ -79,6 +79,7 @@ profile):
 | `CCSL_ASCII`    | `0`     | `1` = ASCII bar (`#`/`-`) + `\|/-\` spinner           |
 | `CCSL_NERD`     | `auto`  | `auto` detect a Nerd Font, `1` force icons, `0` off   |
 | `CCSL_MARGIN`   | `6`     | columns reserved at the right edge (anti-clip)        |
+| `CCSL_GIT_TTL`  | `2`     | seconds to cache git state between animation ticks    |
 
 ### Nerd Font icons
 
@@ -102,6 +103,48 @@ safe on machines without one — it falls back to `eff:high`, `git:main`, `↑1 
 
 After installing, **set your terminal profile's font** to the Nerd Font (e.g.
 "JetBrainsMono Nerd Font") — the shell can't switch the terminal font for you.
+
+> **The font must be selected in whatever actually draws the terminal.** Installing
+> the font is not enough; each terminal app, multiplexer, or wrapper has its own font
+> setting that has to point at the Nerd Font:
+>
+> - **Warp** — Settings (`Cmd+,`) → Appearance → Text → *Terminal font*
+> - **iTerm2** — Settings → Profiles → Text → *Font*
+> - **Apple Terminal** — Settings → Profiles → Text → *Font*
+> - **VS Code / Cursor integrated terminal** — set `"terminal.integrated.fontFamily": "JetBrainsMono Nerd Font"`
+> - **Alacritty / Kitty / WezTerm** — set the font family in their config file
+> - **tmux / screen** — these don't draw glyphs themselves, but they can mangle
+>   wide/PUA glyphs; make sure the *outer* terminal uses the Nerd Font
+>
+> If icons show as blank cells or boxes, the drawing layer isn't using the Nerd Font
+> yet. Prefer the plain `JetBrainsMono Nerd Font` variant over the `…Mono`/`…Propo`
+> variants — the `Mono` variant squeezes icons into a narrow cell and can clip them.
+
+## Performance
+
+The script does no network I/O and **costs zero API tokens** — Claude Code runs it
+locally. Per invocation it runs `jq` once and, on a cache miss, ~8 short-lived `git`
+subprocesses; git state is cached for `CCSL_GIT_TTL` seconds (default 2) so most
+animation ticks skip the git calls entirely.
+
+Measured on an Apple Silicon Mac: **~25 ms per cached tick, ~45 ms on a git refresh.**
+At `refreshInterval: 1` that's on the order of **2–5% of a single CPU core while the
+session is idle, and 0% while you're actively working** (see below). Negligible in
+practice; if you want it even lighter, raise `CCSL_GIT_TTL` or the refresh interval.
+
+## Why the animation updates once per second
+
+`refreshInterval: 1` is the **fastest Claude Code allows** — the
+[docs](https://code.claude.com/docs/en/statusline) state the minimum is `1` second,
+so one frame per second is the ceiling, not a choice. Two more facts worth knowing:
+
+- Frames are derived from wall-clock time (`epoch / refreshInterval`), so at a 1 s
+  interval the shimmer/spinner advance one step per second.
+- The refresh timer **only fires while the session is idle.** During active
+  streaming the harness drives status-line updates its own way, so you won't see
+  steady 1 s animation mid-response. This is a platform constraint, not a bug.
+
+Set `CCSL_ANIM=0` for a fully static line if you'd rather not have the tick at all.
 
 Example — static, ASCII, no color:
 

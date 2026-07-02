@@ -41,6 +41,7 @@ CCSL_BAR_MAX=${CCSL_BAR_MAX:-60}
 CCSL_COLOR=${CCSL_COLOR:-1}
 CCSL_ASCII=${CCSL_ASCII:-0}
 CCSL_NERD=${CCSL_NERD:-auto}   # auto | 1 | 0 : use Nerd Font glyphs for icons
+CCSL_GIT_TTL=${CCSL_GIT_TTL:-2}  # seconds to cache git state between ticks
 [ "$CCSL_ANIM" = "0" ] && { CCSL_SPINNER=0; CCSL_SHIMMER=0; CCSL_MARQUEE=0; }
 
 # --- terminal width (harness sets COLUMNS; fall back sanely) ----------------
@@ -222,11 +223,34 @@ fi
 [ "$OUTSTYLE" != "default" ] && L="$L  ${DIM}style:${OUTSTYLE}${RESET}"
 
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  BRANCH=$(git branch --show-current 2>/dev/null)
-  DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
-  STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
-  MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
-  UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+  # Git state is the expensive part (~8 subprocesses). Cache it per session+repo
+  # and only refresh every CCSL_GIT_TTL seconds, so most animation ticks read
+  # the cache instead of shelling out. Stale-by-a-second git counts are fine.
+  GTOP=$(git rev-parse --show-toplevel 2>/dev/null)
+  GKEY=$(printf '%s' "${SESSID}:${GTOP}" | cksum | cut -d' ' -f1)
+  GCACHE="${TMPDIR:-/tmp}/ccsl-git-${GKEY}"
+  GAGE=999
+  if [ -f "$GCACHE" ]; then
+    MT=$(stat -f %m "$GCACHE" 2>/dev/null || stat -c %Y "$GCACHE" 2>/dev/null || echo 0)
+    GAGE=$(( NOW - MT ))
+  fi
+  if [ "$GAGE" -ge "$CCSL_GIT_TTL" ]; then
+    BRANCH=$(git branch --show-current 2>/dev/null)
+    DIR=$(basename "$GTOP")
+    STAGED=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+    MODIFIED=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+    UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+    AHEAD=0; BEHIND=0
+    if UP=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null); then
+      AB=$(git rev-list --left-right --count "${UP}...HEAD" 2>/dev/null)
+      BEHIND=$(echo "$AB" | cut -f1); AHEAD=$(echo "$AB" | cut -f2)
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$BRANCH" "$DIR" "$STAGED" "$MODIFIED" "$UNTRACKED" "${AHEAD:-0}" "${BEHIND:-0}" \
+      > "$GCACHE" 2>/dev/null
+  else
+    IFS=$'\t' read -r BRANCH DIR STAGED MODIFIED UNTRACKED AHEAD BEHIND < "$GCACHE"
+  fi
 
   # dir: folder icon (nerd) or plain name ; git: branch icon or "git:"
   DPFX=""; [ -n "$I_DIR" ] && DPFX="${I_DIR} "
@@ -239,12 +263,8 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   [ -z "$D" ] && D=" ${GREEN}${I_CLEAN}${RESET}"
   L="$L$D"
 
-  if UP=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null); then
-    AB=$(git rev-list --left-right --count "${UP}...HEAD" 2>/dev/null)
-    BEHIND=$(echo "$AB" | cut -f1); AHEAD=$(echo "$AB" | cut -f2)
-    [ "${AHEAD:-0}"  -gt 0 ] && L="$L ${CYAN}${I_AHEAD}${AHEAD}${RESET}"
-    [ "${BEHIND:-0}" -gt 0 ] && L="$L ${CYAN}${I_BEHIND}${BEHIND}${RESET}"
-  fi
+  [ "${AHEAD:-0}"  -gt 0 ] && L="$L ${CYAN}${I_AHEAD}${AHEAD}${RESET}"
+  [ "${BEHIND:-0}" -gt 0 ] && L="$L ${CYAN}${I_BEHIND}${BEHIND}${RESET}"
 fi
 
 if [ -n "$PR_NUM" ]; then
