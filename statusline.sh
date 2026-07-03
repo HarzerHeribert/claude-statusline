@@ -303,11 +303,16 @@ nerd_installed() {
   fi
   local found=0
   if command -v fc-list >/dev/null 2>&1; then
+    # Linux (and WSL / any host with fontconfig)
     fc-list 2>/dev/null | grep -qiE 'nerd font|nerdfont' && found=1
   else
     # macOS: no fc-list by default -> look for a *Nerd Font*.ttf in font dirs
     ls "$HOME/Library/Fonts"/*[Nn]erd* /Library/Fonts/*[Nn]erd* \
        /System/Library/Fonts/*[Nn]erd* 2>/dev/null | grep -q . && found=1
+    # Windows via Git Bash / MSYS: check the Windows font directories too
+    ls "${WINDIR:-/c/Windows}/Fonts"/*[Nn]erd* \
+       "${LOCALAPPDATA:-}/Microsoft/Windows/Fonts"/*[Nn]erd* 2>/dev/null \
+       | grep -q . && found=1
   fi
   printf '%s' "$found" > "$c" 2>/dev/null; printf '%s' "$NOW" > "$c.ts" 2>/dev/null
   [ "$found" = "1" ]
