@@ -90,6 +90,18 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# --- portable mtime --------------------------------------------------------
+# GNU stat wants `-c %Y`; BSD/macOS stat wants `-f %m`. IMPORTANT: on GNU stat
+# `-f` means "filesystem info" and SUCCEEDS (printing to stdout), so the old
+# `stat -f %m ... || stat -c %Y ...` fallback never reached the GNU branch and
+# fed junk like `File: "..."` into arithmetic -> `set -u` abort on cached ticks.
+# Detect the flavor once and use only the right form.
+if stat -c %Y . >/dev/null 2>&1; then
+  stat_mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
+else
+  stat_mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }
+fi
+
 # --- frame counter (needed here for the data-cache TTL) --------------------
 NOW=$(date +%s)
 [ "$CCSL_REFRESH" -lt 1 ] 2>/dev/null && CCSL_REFRESH=1
@@ -114,7 +126,7 @@ HASH=$(printf '%s' "$input" | cksum | tr -d ' ')
 
 data_fresh=0
 if [ "$CCSL_DECOUPLE" = "1" ] && [ -f "$DATA_CACHE" ]; then
-  MT=$(stat -f %m "$DATA_CACHE" 2>/dev/null || stat -c %Y "$DATA_CACHE" 2>/dev/null || echo 0)
+  MT=$(stat_mtime "$DATA_CACHE"); MT=${MT:-0}
   AGE=$(( NOW - MT ))
   # first line of the snapshot is "# <hash>"; compare without sourcing.
   CACHED_HASH=$(head -1 "$DATA_CACHE" 2>/dev/null)
@@ -167,7 +179,7 @@ if [ "$data_fresh" != "1" ]; then
     GCACHE="${TMPDIR:-/tmp}/ccsl-git-${GKEY}"
     GAGE=999
     if [ -f "$GCACHE" ]; then
-      GMT=$(stat -f %m "$GCACHE" 2>/dev/null || stat -c %Y "$GCACHE" 2>/dev/null || echo 0)
+      GMT=$(stat_mtime "$GCACHE"); GMT=${GMT:-0}
       GAGE=$(( NOW - GMT ))
     fi
     if [ "$GAGE" -ge "$CCSL_GIT_TTL" ]; then
@@ -298,7 +310,8 @@ CTX_LABEL="200k"; [ "$CTX_SIZE" -ge 1000000 ] && CTX_LABEL="1M"
 # =0 forces the ASCII/Unicode fallback. ASCII mode always wins (no glyphs).
 nerd_installed() {
   local c="${TMPDIR:-/tmp}/ccsl-nerd.detect"
-  if [ -f "$c" ] && [ "$(( NOW - $(cat "$c.ts" 2>/dev/null || echo 0) ))" -lt 86400 ]; then
+  ts=$(cat "$c.ts" 2>/dev/null || echo 0); ts=${ts:-0}
+  if [ -f "$c" ] && [ "$(( NOW - ts ))" -lt 86400 ]; then
     [ "$(cat "$c" 2>/dev/null)" = "1" ]; return
   fi
   local found=0
