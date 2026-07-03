@@ -1,12 +1,12 @@
 # claude-statusline
 
-A verbose, full-width, **no-emoji**, lightly **animated** status line for
+A verbose, full-width, **no-emoji** status line for
 [Claude Code](https://code.claude.com/docs/en/statusline).
 
 Two rows, left/right justified to fill the terminal:
 
 ```
-Opus 4.8 (1M context):1M  eff:xhigh  think:on  ⠏ working    :: bitesize git:main clean ^1 v1  :: PR#673 OK          5h 23% 2h14m  |  7d 41% 83h20m
+Opus 4.8 (1M context):1M  eff:xhigh  think:on    :: bitesize git:main clean ^1 v1  :: PR#673 OK          5h 23% 2h14m  |  7d 41% 83h20m
 ctx [██████████████████████░░░░░░░░░░░░░░░░░░░░] 38% 379k/1M                                          ~$1283.62  |  +22909/-967  |  25h11m (api 8h03m)
 ```
 
@@ -21,25 +21,6 @@ Actual render (Nerd Font icons, `auto mode` footer badge is Claude Code's, not o
   the right.
 - **Row 2** — a context-usage bar (color-coded, scales to terminal width) with % and
   token count; cost estimate, lines changed, and durations on the right.
-
-### Animation: state flips only — the bar never moves
-
-Claude Code renders the status line at most **once per second** (see
-[below](#why-the-animation-updates-once-per-second)). At that rate any *motion* —
-sweeps, waves, pulses — doesn't read as animation, it reads as broken rendering.
-So the context bar **never animates**. Instead it has a static **shine**: the last
-cells of the fill step up through brighter shades of the *same hue* (256-color
-when supported), so the bar reads as lit and glossy while rendering byte-identical
-every tick.
-
-What does animate are discrete **state flips**, which look fine at 1 fps:
-
-- **Spinner** — `⠋⠙⠹…` next to the model while the API is actively responding
-  (detected by watching `total_api_duration_ms` advance between ticks).
-- **Warn blink** — context ≥90%, rate limit ≥90%, and "changes requested" blink.
-- **Marquee** *(opt-in)* — the right rail of row 2 cycles through
-  cost → lines → durations → tokens, one per tick.
-- **Separators** *(opt-in)* — the `::` / `|` separators cycle subtly.
 
 ## Honest about cost
 
@@ -73,9 +54,8 @@ cd claude-statusline
 ```
 
 The installer copies `statusline.sh` to `~/.claude/`, backs up your
-`settings.json`, and wires up the `statusLine` block with `refreshInterval: 1`
-(the fastest allowed — cheap, since unchanged ticks skip `jq`/`git` and an idle
-bar renders identically). It appears on your next interaction with Claude Code.
+`settings.json`, and wires up the `statusLine` block. It appears on your next
+interaction with Claude Code.
 
 ```bash
 REFRESH=5 ./install.sh     # slower tick, if you want it even lighter
@@ -112,12 +92,11 @@ ASCII/Unicode fallback everywhere (see [Nerd Font icons](#nerd-font-icons)).
 ## Preview it without a session
 
 ```bash
-./demo.sh        # live render in your terminal (Ctrl-C to quit)
+./demo.sh        # render in your terminal with sample data (Ctrl-C to quit)
 ```
 
-The demo cycles ~5 s "active" (payload changing → spinner runs, numbers move) and
-~7 s idle (payload frozen → everything holds perfectly still), so you can see
-both states.
+The demo feeds the script sample session data so you can see both rows render
+without starting a Claude Code session.
 
 ## Configuration
 
@@ -198,25 +177,16 @@ After installing, **set your terminal profile's font** to the Nerd Font (e.g.
 > yet. Prefer the plain `JetBrainsMono Nerd Font` variant over the `…Mono`/`…Propo`
 > variants — the `Mono` variant squeezes icons into a narrow cell and can clip them.
 
-## Animation is decoupled from data
+## Rendering is cheap: data is cached between ticks
 
 Claude Code sends the JSON payload on stdin and only changes it when real data
-changes. So the script splits into two phases:
-
-1. **Data** — hash stdin; if it matches the last snapshot (and the snapshot is
-   younger than `CCSL_DATA_TTL`), reuse the cached parsed values and **skip `jq`
-   and `git` entirely.** Otherwise parse with `jq`, gather git state, and write a
-   fresh snapshot.
-2. **Animation** — always runs, but it's pure arithmetic off a wall-clock frame
-   counter (`epoch / refreshInterval`). No subprocesses.
+changes. So the script hashes stdin; if it matches the last snapshot (and the
+snapshot is younger than `CCSL_DATA_TTL`), it reuses the cached parsed values and
+**skips `jq` and `git` entirely.** Otherwise it parses with `jq`, gathers git
+state, and writes a fresh snapshot.
 
 The result: a tick where nothing changed is just a `cksum` + a `source` + string
-math. Every state flip (spinner, warn-blink, marquee, separators) is
-**width-invariant** — it only changes colors or swaps equal-width glyphs — so the
-right-aligned rail never jitters between frames.
-
-This does **not** raise the frame rate (that's capped at 1s, see below); it makes
-each frame as cheap as possible.
+math — no subprocess parsing at all.
 
 ## Performance
 
@@ -233,32 +203,16 @@ Measured on an Apple Silicon Mac. At `refreshInterval: 1` the idle cost is well
 timer is paused then). Raise `CCSL_DATA_TTL` / `CCSL_GIT_TTL` or the interval to
 make it lighter still; set `CCSL_DECOUPLE=0` to always re-parse (debugging).
 
-## Why the animation updates once per second
+## Plain ASCII / no-color mode
 
-`refreshInterval: 1` is the **fastest Claude Code allows** — the
-[docs](https://code.claude.com/docs/en/statusline) state the minimum is `1` second,
-so one frame per second is the ceiling, not a choice. Two more facts worth knowing:
-
-- Output is displayed only when the script **exits** — you can't stream frames from
-  one invocation, and an in-flight run is cancelled when a new update triggers.
-- Event-driven updates are debounced at 300 ms and fire on new messages, `/compact`,
-  permission-mode changes, etc. — not on a smooth clock.
-- The fullscreen (`/tui`) renderer makes redraws flicker-free, but does not change
-  any of the above.
-- **Plugins can't change this either** — plugins add skills, hooks, MCP servers and
-  agents; none of that touches the TUI renderer or the status-line contract.
-
-That 1 fps ceiling is exactly why the bar doesn't animate at all: motion at 1 fps
-reads as broken rendering, while discrete state flips (spinner on/off, a blink, a
-segment swap) read as intended. Set `CCSL_ANIM=0` to turn the state flips off too.
-
-Example — static, ASCII, no color:
+For a minimal, dependency-light render (ASCII bar characters, no color), wire the
+`statusLine` command with those env vars set:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "CCSL_ANIM=0 CCSL_ASCII=1 CCSL_COLOR=0 ~/.claude/statusline.sh",
+    "command": "CCSL_ASCII=1 CCSL_COLOR=0 ~/.claude/statusline.sh",
     "refreshInterval": 10
   }
 }
@@ -269,8 +223,7 @@ Example — static, ASCII, no color:
 Claude Code pipes [session JSON](https://code.claude.com/docs/en/statusline#available-data)
 to the script on stdin; the script prints two lines to stdout. It reads `COLUMNS`
 (set by the harness) for terminal width, uses `jq` to parse the payload, and caches
-one integer per session under `$TMPDIR` for spinner busy-detection. No network, no
-token cost.
+parsed data per session under `$TMPDIR` between ticks. No network, no token cost.
 
 ## License
 
