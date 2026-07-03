@@ -50,7 +50,21 @@ auth), the status line says so rather than faking a number.
 
 ## Install
 
-Requires `bash`, `jq`, and `git`. On macOS: `brew install jq`.
+One line, no clone needed — the installer downloads `statusline.sh` for you:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HarzerHeribert/claude-statusline/main/install.sh | bash
+```
+
+Pass flags after `--`, or env vars before `bash`:
+
+```bash
+curl -fsSL .../install.sh | bash -s -- --no-nerd   # skip the Nerd Font
+curl -fsSL .../install.sh | REFRESH=5 bash          # slower tick
+```
+
+Or clone and run it locally (identical behavior; uses the local script instead
+of downloading):
 
 ```bash
 git clone https://github.com/HarzerHeribert/claude-statusline.git
@@ -68,6 +82,32 @@ REFRESH=5 ./install.sh     # slower tick, if you want it even lighter
 ./install.sh --dry-run     # show changes, do nothing
 ./install.sh --uninstall   # remove the statusLine block (keeps the script)
 ```
+
+### Platform support
+
+Works on **Linux** (all major distros), **macOS**, and **Windows** via Git Bash
+or WSL.
+
+Minimal prerequisites: `bash`, `jq`, and `git`, plus `curl` or `wget` when the
+installer needs to download files. The installer keeps this minimal and will
+install missing prerequisites for you when it finds a supported package manager:
+
+| Platform / manager        | Used for missing prerequisites                    |
+| ------------------------- | ------------------------------------------------- |
+| Debian / Ubuntu           | `apt-get install jq git curl/wget unzip fontconfig` |
+| Fedora / RHEL             | `dnf` / `yum install ...`                         |
+| Arch                      | `pacman -S ...`                                   |
+| openSUSE                  | `zypper install ...`                              |
+| Alpine                    | `apk add ...`                                     |
+| macOS                     | `brew install ...` or `port install ...`          |
+| Windows                   | `choco`, `winget`, `scoop`, or Git Bash `pacman`  |
+
+If no supported package manager is detected, it prints official download links
+for the missing tool (`jq`, `git`, `curl`/`wget`, `unzip`, or `fontconfig`) and
+stops before changing your Claude config.
+
+The Nerd Font is **optional** — without one the status line uses a readable
+ASCII/Unicode fallback everywhere (see [Nerd Font icons](#nerd-font-icons)).
 
 ## Preview it without a session
 
@@ -118,10 +158,24 @@ safe on machines without one — it falls back to `eff:high`, `git:main`, `↑1 
 `PR#673`, etc. The installer can install **JetBrainsMono Nerd Font** for you:
 
 ```bash
-./install.sh --nerd      # brew-install the font + force icons on
+./install.sh --nerd      # install the font + force icons on
 ./install.sh --no-nerd   # skip the font, use the ASCII/Unicode fallback
 ./install.sh             # detects a font; if none, offers to install it
 ```
+
+How the font gets installed per platform:
+
+- **macOS** — `brew install --cask font-jetbrains-mono-nerd-font` (falls back to
+  a direct download into `~/Library/Fonts` if Homebrew is absent).
+- **Linux** — the distro package where one exists (`ttf-jetbrains-mono-nerd` on
+  Arch), otherwise a direct download into `~/.local/share/fonts` + `fc-cache`.
+  Package-manager installs use `sudo` when needed.
+- **Windows (Git Bash)** — downloads the `.ttf`s into your per-user font dir;
+  Windows may still ask you to confirm the install (right-click → Install). Under
+  WSL, the Linux path is used.
+
+Requires `unzip` and `curl`/`wget` for the direct-download path; if either is
+missing the installer prints manual instructions instead.
 
 After installing, **set your terminal profile's font** to the Nerd Font (e.g.
 "JetBrainsMono Nerd Font") — the shell can't switch the terminal font for you.
@@ -134,6 +188,8 @@ After installing, **set your terminal profile's font** to the Nerd Font (e.g.
 > - **iTerm2** — Settings → Profiles → Text → *Font*
 > - **Apple Terminal** — Settings → Profiles → Text → *Font*
 > - **VS Code / Cursor integrated terminal** — set `"terminal.integrated.fontFamily": "JetBrainsMono Nerd Font"`
+> - **Windows Terminal** — Settings → your profile → Appearance → *Font face* (this also covers WSL)
+> - **GNOME Terminal / Konsole** — Preferences → Profile → *Custom font*
 > - **Alacritty / Kitty / WezTerm** — set the font family in their config file
 > - **tmux / screen** — these don't draw glyphs themselves, but they can mangle
 >   wide/PUA glyphs; make sure the *outer* terminal uses the Nerd Font
