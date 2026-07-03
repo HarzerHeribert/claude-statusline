@@ -3,14 +3,8 @@
 A verbose, full-width, **no-emoji** status line for
 [Claude Code](https://code.claude.com/docs/en/statusline).
 
-Two rows, left/right justified to fill the terminal:
-
-```
-Opus 4.8 (1M context):1M  eff:xhigh  think:on    :: bitesize git:main clean ^1 v1  :: PR#673 OK          5h 23% 2h14m  |  7d 41% 83h20m
-ctx [██████████████████████░░░░░░░░░░░░░░░░░░░░] 38% 379k/1M                                          ~$1283.62  |  +22909/-967  |  25h11m (api 8h03m)
-```
-
-Actual render (Nerd Font icons, `auto mode` footer badge is Claude Code's, not ours):
+Two rows, left/right justified to fill the terminal (Nerd Font icons; the
+`auto mode` footer badge is Claude Code's, not ours):
 
 ![claude-statusline screenshot](statusline.png)
 
