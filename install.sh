@@ -399,12 +399,13 @@ else
 fi
 
 # ---- wire settings.json ---------------------------------------------------
-# We point "command" at the script and set matching CCSL_REFRESH so animation
-# frame timing lines up with refreshInterval. If the user forced nerd on/off,
-# bake CCSL_NERD in too; otherwise leave it to runtime auto-detect.
-CMD="CCSL_REFRESH=$REFRESH"
-[ -n "$FORCE_NERD" ] && CMD="$CMD CCSL_NERD=$FORCE_NERD"
-CMD="$CMD ~/.claude/statusline.sh"
+# The script needs no frame-rate hint: motion advances off an invocation
+# counter, so it self-adjusts to whatever rate Claude Code actually re-renders
+# at. If the user forced nerd on/off, bake CCSL_NERD in; otherwise leave it to
+# runtime auto-detect.
+CMD=""
+[ -n "$FORCE_NERD" ] && CMD="CCSL_NERD=$FORCE_NERD "
+CMD="$CMD~/.claude/statusline.sh"
 BLOCK=$(cat <<JSON
 {
   "type": "command",
